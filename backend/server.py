@@ -97,9 +97,10 @@ def _run_crawl(url: str):
             "success":      True,
             "pdf_found":    len(found_pdf_links),
             "downloaded":   len(downloaded_files),
+            "pages":        _state["pages"],   # include final page count
             "folder":       folder,
-            "excel_file":   excel_path,   # local path — served via /download-excel
-            "zip_ready":    True,         # client can call /download-zip
+            "excel_file":   excel_path,
+            "zip_ready":    True,
             "files":        [
                 {"name": os.path.basename(f), "path": f}
                 for f in downloaded_files

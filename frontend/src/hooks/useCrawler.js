@@ -131,6 +131,12 @@ export function useCrawler() {
 
           if (s.result) {
             const data = s.result
+            // Set all final stats from result (pages may not have polled in time)
+            setStats({
+              pages:      data.pages      || s.pages      || 0,
+              pdf_found:  data.pdf_found  || s.pdf_found  || 0,
+              downloaded: data.downloaded || s.downloaded || 0,
+            })
             setResult(data)
             setStatus('done')
             addLog('success', `Crawl completed in ${finalElapsed}s`)
