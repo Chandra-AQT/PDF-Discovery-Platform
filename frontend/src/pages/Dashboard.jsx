@@ -15,13 +15,38 @@ export default function Dashboard({ crawler, activeTab }) {
     isRunning, isDone, isError,
   } = crawler
 
+  // Show stats whenever something is happening or has happened
+  const showStats = isRunning || isDone || isError || status === 'starting'
+
   if (activeTab === 'crawler') {
     return (
       <div className="space-y-5">
-        <CrawlerInput onStart={startCrawl} isRunning={isRunning} isDone={isDone} currentUrl={currentUrl} elapsed={elapsed} />
+        {/* Input always on top */}
+        <CrawlerInput
+          onStart={startCrawl}
+          isRunning={isRunning}
+          isDone={isDone}
+          currentUrl={currentUrl}
+          elapsed={elapsed}
+        />
+
         {isError && <ErrorAlert error={error} onDismiss={reset} />}
-        {(isRunning || isDone || isError) && <StatsCards stats={stats} isRunning={isRunning} isDone={isDone} status={status} />}
-        {(isRunning || logs.length > 0) && <LogsPanel logs={logs} isRunning={isRunning} />}
+
+        {/* Stats appear immediately when crawl starts, stay visible after done */}
+        {showStats && (
+          <StatsCards
+            stats={stats}
+            isRunning={isRunning}
+            isDone={isDone}
+            status={status}
+          />
+        )}
+
+        {/* Logs appear as soon as there are entries */}
+        {(isRunning || isDone || logs.length > 0) && (
+          <LogsPanel logs={logs} isRunning={isRunning} />
+        )}
+
         {isDone && result && <DatasetPanel result={result} />}
       </div>
     )
@@ -33,7 +58,7 @@ export default function Dashboard({ crawler, activeTab }) {
         {isDone && result && <DatasetPanel result={result} />}
         <PdfTable result={result} />
         {!result && !isRunning && (
-          <div className="text-center pt-4 text-zinc-600 font-mono text-sm">
+          <div className="card p-10 text-center font-mono text-sm" style={{ color: '#94b8e0' }}>
             Run a crawl from the Crawler tab to see results here.
           </div>
         )}
@@ -42,13 +67,21 @@ export default function Dashboard({ crawler, activeTab }) {
   }
 
   if (activeTab === 'charts') {
-    return <div className="space-y-5"><Charts history={history} stats={stats} /></div>
+    return (
+      <div className="space-y-5">
+        <Charts history={history} stats={stats} />
+      </div>
+    )
   }
 
   if (activeTab === 'history') {
     return (
       <div className="space-y-5">
-        <HistoryPanel history={history} onRerun={(url) => startCrawl(url)} onClear={clearHistory} />
+        <HistoryPanel
+          history={history}
+          onRerun={(url) => startCrawl(url)}
+          onClear={clearHistory}
+        />
       </div>
     )
   }

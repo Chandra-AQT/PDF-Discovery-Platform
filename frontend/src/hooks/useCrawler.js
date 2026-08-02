@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { crawlSite, getStatus } from '../api/api'
 
-const POLL_MS = 2000
+const POLL_MS = 1000  // poll every 1s for responsive live stats
 const HISTORY_KEY = 'docplus_history'
 
 let logId = 0
@@ -85,12 +85,15 @@ export function useCrawler() {
   }, [addLog])
 
   const startPolling = useCallback(() => {
-    pollRef.current = setInterval(async () => {
+    // Immediate first poll so stats show instantly
+    const poll = async () => {
       try {
         const s = await getStatus()
         setStats({ pages: s.pages || 0, pdf_found: s.pdf_found || 0, downloaded: s.downloaded || 0 })
       } catch {}
-    }, POLL_MS)
+    }
+    poll()
+    pollRef.current = setInterval(poll, POLL_MS)
   }, [])
 
   const startCrawl = useCallback(async (url) => {
