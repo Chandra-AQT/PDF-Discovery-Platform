@@ -167,7 +167,7 @@ async def crawl(req: UrlRequest):
     _reset_state()
 
     # Run blocking crawl in thread pool — doesn't block the event loop
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     loop.run_in_executor(_executor, _run_crawl, req.url)
 
     # Return immediately — frontend polls /status
