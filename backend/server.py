@@ -234,10 +234,27 @@ async def crawl(req: UrlRequest):
         raise HTTPException(status_code=400,
             detail="Please enter a valid URL starting with http:// or https://")
 
+    # Reset state FIRST so polls see running=True immediately
     _reset_state()
+
+    # Small delay to ensure state is flushed before thread reads it
     loop = asyncio.get_running_loop()
     loop.run_in_executor(_executor, _run_crawl, req.url)
+
     return {"message": "Crawl started", "running": True}
+
+
+@app.delete("/crawl")
+async def cancel_crawl():
+    """Allow frontend to reset state if a stale result is stuck."""
+    with _state_lock:
+        _state.update({
+            "running": False, "phase": "idle",
+            "pages": 0, "pdf_found": 0,
+            "downloaded": 0, "total_to_download": 0,
+            "progress": 0, "result": None, "error": None,
+        })
+    return {"message": "State cleared"}
 
 
 @app.get("/download-excel")

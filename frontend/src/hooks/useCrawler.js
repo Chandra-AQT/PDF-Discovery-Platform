@@ -104,6 +104,9 @@ export function useCrawler() {
 
   // ── Poll /status until running === false, then resolve ───────────────────
   const startPolling = useCallback((normalised) => {
+    // Wait for backend to confirm running=true first, then watch for running=false
+    let confirmed = false
+
     const poll = async () => {
       try {
         const s = await getStatus()
@@ -118,14 +121,18 @@ export function useCrawler() {
           phase:      s.phase      || 'running',
         })
 
-        // Crawl finished on backend
-        if (!s.running) {
+        // Wait until backend confirms it's actually running before watching for done
+        if (!confirmed && s.running) {
+          confirmed = true
+        }
+
+        // Only resolve when running goes false AND we confirmed it was running
+        if (confirmed && !s.running) {
           stopAll()
           const finalElapsed = Math.floor((Date.now() - startTime.current) / 1000)
           setElapsed(finalElapsed)
 
           if (s.error) {
-            // Backend reported an error
             setStatus('error')
             setError(s.error)
             addLog('error', `Crawl failed: ${s.error}`)
@@ -134,45 +141,29 @@ export function useCrawler() {
 
           if (s.result) {
             const data = s.result
-            // Set all final stats from result (pages may not have polled in time)
             setStats({
               pages:      data.pages      || s.pages      || 0,
               pdf_found:  data.pdf_found  || s.pdf_found  || 0,
               downloaded: data.downloaded || s.downloaded || 0,
+              total:      data.pdf_found  || s.total      || 0,
+              progress:   100,
+              phase:      'done',
             })
             setResult(data)
             setStatus('done')
             addLog('success', `Crawl completed in ${finalElapsed}s`)
             addLog('success', `Found ${data.pdf_found} PDFs, downloaded ${data.downloaded}`)
-            if (data.excel_file)   addLog('success', 'Excel dataset ready for download')
-            if (data.zip_download) addLog('success', 'ZIP archive ready for download')
+            if (data.excel_file) addLog('success', 'Excel dataset ready for download')
+            if (data.zip_ready)  addLog('success', 'ZIP archive ready for download')
             saveToHistory(normalised, data, finalElapsed)
-          } else {
-            // result not ready yet even though running=false, try one more time
-            setTimeout(async () => {
-              try {
-                const retry = await getStatus()
-                if (retry.result) {
-                  const data = retry.result
-                  setStats({ pages: retry.pages || 0, pdf_found: data.pdf_found || 0, downloaded: data.downloaded || 0 })
-                  setResult(data)
-                  setStatus('done')
-                  addLog('success', `Crawl completed in ${finalElapsed}s`)
-                  addLog('success', `Found ${data.pdf_found} PDFs, downloaded ${data.downloaded}`)
-                  if (data.excel_file)   addLog('success', 'Excel dataset ready for download')
-                  if (data.zip_download) addLog('success', 'ZIP archive ready for download')
-                  saveToHistory(normalised, data, finalElapsed)
-                }
-              } catch {}
-            }, 1000)
           }
         }
-      } catch (err) {
-        // Network error while polling — keep trying unless status is already error
+      } catch {
+        // silent poll failure
       }
     }
 
-    // Immediate first poll
+    // Start polling immediately
     poll()
     pollRef.current = setInterval(poll, POLL_MS)
   }, [stopAll, addLog, saveToHistory])
