@@ -173,13 +173,36 @@ export function useCrawler() {
     }, 1000)
 
     try {
-      // POST /crawl — returns immediately now (fire and forget)
-      await crawlSite(normalised)
+      // POST /crawl
+      // New backend: returns {running: true} immediately, result comes via /status polling
+      // Old backend: returns full result synchronously
+      const data = await crawlSite(normalised)
 
-      // Switch to running and start polling for live stats + final result
+      // Switch to running and start polling
       setStatus('running')
       startLogStream()
-      startPolling(normalised)
+
+      // If backend returned full result immediately (old sync behavior)
+      if (data && data.pdf_found !== undefined && !data.running) {
+        stopAll()
+        const finalElapsed = Math.floor((Date.now() - startTime.current) / 1000)
+        setElapsed(finalElapsed)
+        setStats({
+          pages:      0,
+          pdf_found:  data.pdf_found  || 0,
+          downloaded: data.downloaded || 0,
+        })
+        setResult(data)
+        setStatus('done')
+        addLog('success', `Crawl completed in ${finalElapsed}s`)
+        addLog('success', `Found ${data.pdf_found} PDFs, downloaded ${data.downloaded}`)
+        if (data.excel_file)   addLog('success', 'Excel dataset ready for download')
+        if (data.zip_download) addLog('success', 'ZIP archive ready for download')
+        saveToHistory(normalised, data, finalElapsed)
+      } else {
+        // New async behavior — poll /status for live updates and final result
+        startPolling(normalised)
+      }
 
     } catch (err) {
       stopAll()
