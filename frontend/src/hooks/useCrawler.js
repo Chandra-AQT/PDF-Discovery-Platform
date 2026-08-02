@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { crawlSite, getStatus } from '../api/api'
 
-const POLL_MS = 1000  // poll every 1s for responsive live stats
+const POLL_MS     = 1000   // poll every 1s for live stats
 const HISTORY_KEY = 'docplus_history'
 
 let logId = 0
@@ -84,18 +84,73 @@ export function useCrawler() {
     }, 1800)
   }, [addLog])
 
-  const startPolling = useCallback(() => {
-    // Immediate first poll so stats show instantly
+  // ── Save a completed crawl to history ────────────────────────────────────
+  const saveToHistory = useCallback((url, data, finalElapsed) => {
+    const entry = {
+      id: Date.now(), url, date: new Date().toISOString(),
+      pdf_found:    data.pdf_found    || 0,
+      downloaded:   data.downloaded   || 0,
+      folder:       data.folder       || '',
+      excel_file:   data.excel_file   || '',
+      zip_download: data.zip_download || '',
+      elapsed:      finalElapsed,
+    }
+    setHistory((prev) => {
+      const next = [entry, ...prev.slice(0, 49)]
+      saveHistory(next)
+      return next
+    })
+  }, [])
+
+  // ── Poll /status until running === false, then resolve ───────────────────
+  const startPolling = useCallback((normalised) => {
     const poll = async () => {
       try {
         const s = await getStatus()
-        setStats({ pages: s.pages || 0, pdf_found: s.pdf_found || 0, downloaded: s.downloaded || 0 })
-      } catch {}
+
+        // Update live counters always
+        setStats({
+          pages:      s.pages      || 0,
+          pdf_found:  s.pdf_found  || 0,
+          downloaded: s.downloaded || 0,
+        })
+
+        // Crawl finished on backend
+        if (!s.running) {
+          stopAll()
+          const finalElapsed = Math.floor((Date.now() - startTime.current) / 1000)
+          setElapsed(finalElapsed)
+
+          if (s.error) {
+            // Backend reported an error
+            setStatus('error')
+            setError(s.error)
+            addLog('error', `Crawl failed: ${s.error}`)
+            return
+          }
+
+          if (s.result) {
+            const data = s.result
+            setResult(data)
+            setStatus('done')
+            addLog('success', `Crawl completed in ${finalElapsed}s`)
+            addLog('success', `Found ${data.pdf_found} PDFs, downloaded ${data.downloaded}`)
+            if (data.excel_file)   addLog('success', 'Excel dataset ready for download')
+            if (data.zip_download) addLog('success', 'ZIP archive ready for download')
+            saveToHistory(normalised, data, finalElapsed)
+          }
+        }
+      } catch (err) {
+        // Network error while polling — keep trying unless status is already error
+      }
     }
+
+    // Immediate first poll
     poll()
     pollRef.current = setInterval(poll, POLL_MS)
-  }, [])
+  }, [stopAll, addLog, saveToHistory])
 
+  // ── Main start function ───────────────────────────────────────────────────
   const startCrawl = useCallback(async (url) => {
     if (!url?.trim()) return
     const normalised = url.startsWith('http') ? url.trim() : `https://${url.trim()}`
@@ -117,50 +172,24 @@ export function useCrawler() {
       setElapsed(Math.floor((Date.now() - startTime.current) / 1000))
     }, 1000)
 
-    startPolling()
-    setTimeout(() => { setStatus('running'); startLogStream() }, 600)
-
     try {
-      const data = await crawlSite(normalised)
-      stopAll()
+      // POST /crawl — returns immediately now (fire and forget)
+      await crawlSite(normalised)
 
-      try {
-        const s = await getStatus()
-        setStats({
-          pages:      s.pages      || 0,
-          pdf_found:  data.pdf_found  || s.pdf_found  || 0,
-          downloaded: data.downloaded || s.downloaded || 0,
-        })
-      } catch {
-        setStats({ pages: 0, pdf_found: data.pdf_found || 0, downloaded: data.downloaded || 0 })
-      }
+      // Switch to running and start polling for live stats + final result
+      setStatus('running')
+      startLogStream()
+      startPolling(normalised)
 
-      const finalElapsed = Math.floor((Date.now() - startTime.current) / 1000)
-      setElapsed(finalElapsed)
-      setResult(data)
-      setStatus('done')
-
-      addLog('success', `Crawl completed in ${finalElapsed}s`)
-      addLog('success', `Found ${data.pdf_found} PDFs, downloaded ${data.downloaded}`)
-      if (data.excel_file)   addLog('success', 'Excel dataset ready for download')
-      if (data.zip_download) addLog('success', 'ZIP archive ready for download')
-
-      const entry = {
-        id: Date.now(), url: normalised, date: new Date().toISOString(),
-        pdf_found: data.pdf_found || 0, downloaded: data.downloaded || 0,
-        folder: data.folder || '', excel_file: data.excel_file || '',
-        zip_download: data.zip_download || '', elapsed: finalElapsed,
-      }
-      setHistory((prev) => { const next = [entry, ...prev.slice(0, 49)]; saveHistory(next); return next })
     } catch (err) {
       stopAll()
       setStatus('error')
       setError(err.message)
-      addLog('error', `Crawl failed: ${err.message}`)
+      addLog('error', `Failed to start crawl: ${err.message}`)
       if (/network|timeout|econnrefused/i.test(err.message))
         addLog('warn', 'Tip: Make sure the backend is running on http://localhost:8000')
     }
-  }, [stopAll, addLog, startPolling, startLogStream])
+  }, [stopAll, addLog, startLogStream, startPolling])
 
   const reset = useCallback(() => {
     stopAll()
@@ -176,7 +205,9 @@ export function useCrawler() {
   return {
     startCrawl, reset, clearHistory, status, stats, logs, result, error,
     currentUrl, elapsed, history,
-    isIdle: status === 'idle', isRunning: status === 'running' || status === 'starting',
-    isDone: status === 'done', isError: status === 'error',
+    isIdle:    status === 'idle',
+    isRunning: status === 'running' || status === 'starting',
+    isDone:    status === 'done',
+    isError:   status === 'error',
   }
 }

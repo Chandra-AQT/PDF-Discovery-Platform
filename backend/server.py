@@ -1,5 +1,7 @@
 import os
+import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -11,8 +13,6 @@ from excel_service import create_excel
 from zip_service import create_zip
 
 app = FastAPI(title="DocPlus API")
-
-import os
 
 # In production set ALLOWED_ORIGINS env var to your Vercel URL
 # e.g. ALLOWED_ORIGINS=https://docplus.vercel.app
@@ -30,35 +30,94 @@ app.add_middleware(
 os.makedirs("downloads", exist_ok=True)
 app.mount("/downloads", StaticFiles(directory="downloads"), name="downloads")
 
+# ── Thread pool for running blocking crawl off the async event loop ────────────
+_executor = ThreadPoolExecutor(max_workers=2)
+
 # ── Live crawl state (thread-safe) ────────────────────────────────────────────
 _state_lock = threading.Lock()
 _state = {
-    "running": False,
-    "pages": 0,
-    "pdf_found": 0,
+    "running":    False,
+    "pages":      0,
+    "pdf_found":  0,
     "downloaded": 0,
+    "result":     None,   # stores final result for polling after completion
+    "error":      None,
 }
 
 
 def _reset_state():
     with _state_lock:
-        _state["running"] = True
-        _state["pages"] = 0
-        _state["pdf_found"] = 0
+        _state["running"]    = True
+        _state["pages"]      = 0
+        _state["pdf_found"]  = 0
         _state["downloaded"] = 0
+        _state["result"]     = None
+        _state["error"]      = None
 
 
 def _update_progress(pages: int, pdf_found: int):
     with _state_lock:
-        _state["pages"] = pages
+        _state["pages"]     = pages
         _state["pdf_found"] = pdf_found
 
 
-def _finish_state(downloaded: int, pdf_found: int):
+def _update_downloaded(downloaded: int):
+    with _state_lock:
+        _state["downloaded"] = downloaded
+
+
+def _finish_state(result=None, error=None):
     with _state_lock:
         _state["running"] = False
-        _state["downloaded"] = downloaded
-        _state["pdf_found"] = pdf_found
+        if result:
+            _state["pdf_found"]  = result.get("pdf_found",  _state["pdf_found"])
+            _state["downloaded"] = result.get("downloaded", _state["downloaded"])
+            _state["result"]     = result
+        if error:
+            _state["error"] = error
+
+
+# ── The actual blocking crawl — runs in thread pool ───────────────────────────
+def _run_crawl(url: str):
+    """Blocking function: crawl → download → excel → zip. Returns result dict."""
+    try:
+        found_pdf_links = crawl_website(url, progress_callback=_update_progress)
+
+        if not found_pdf_links:
+            _finish_state(error="No PDF links found on this website.")
+            return
+
+        with _state_lock:
+            _state["pdf_found"] = len(found_pdf_links)
+
+        downloaded_files, folder = download_all_pdfs(found_pdf_links, url)
+        _update_downloaded(len(downloaded_files))
+
+        excel_path = create_excel(found_pdf_links, folder)
+        zip_path   = create_zip(folder)
+
+        result = {
+            "success":      True,
+            "pdf_found":    len(found_pdf_links),
+            "downloaded":   len(downloaded_files),
+            "folder":       folder,
+            "excel_file":   f"/downloads/{os.path.relpath(excel_path, 'downloads').replace(os.sep, '/')}",
+            "zip_download": f"/downloads/{os.path.relpath(zip_path,   'downloads').replace(os.sep, '/')}",
+            "files": [
+                {
+                    "name": os.path.basename(f),
+                    "path": f,
+                    "url":  f"/downloads/{os.path.relpath(f, 'downloads').replace(os.sep, '/')}",
+                }
+                for f in downloaded_files
+            ],
+            "message": "Crawl completed successfully",
+        }
+        _finish_state(result=result)
+
+    except Exception as e:
+        print(f"[CRAWL THREAD ERROR] {e}")
+        _finish_state(error=str(e))
 
 
 # ── Models ─────────────────────────────────────────────────────────────────────
@@ -74,18 +133,24 @@ def root():
 
 @app.get("/status")
 def status():
+    """Returns live crawl progress. Always responds immediately."""
     with _state_lock:
         return {
             "pages":      _state["pages"],
             "pdf_found":  _state["pdf_found"],
             "downloaded": _state["downloaded"],
             "running":    _state["running"],
+            "error":      _state["error"],
+            "result":     _state["result"],
         }
 
 
 @app.post("/crawl")
-def crawl(req: UrlRequest):
-    # Reject if another crawl is already running
+async def crawl(req: UrlRequest):
+    """
+    Kicks off the crawl in a background thread and returns immediately.
+    The frontend polls /status for live progress and the final result.
+    """
     with _state_lock:
         if _state["running"]:
             raise HTTPException(
@@ -101,60 +166,9 @@ def crawl(req: UrlRequest):
 
     _reset_state()
 
-    try:
-        # Crawl with live progress updates
-        found_pdf_links = crawl_website(
-            req.url,
-            progress_callback=_update_progress
-        )
+    # Run blocking crawl in thread pool — doesn't block the event loop
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(_executor, _run_crawl, req.url)
 
-        if not found_pdf_links:
-            _finish_state(downloaded=0, pdf_found=0)
-            raise HTTPException(
-                status_code=404,
-                detail="No PDF links found on this website. The site may block crawling or have no PDFs."
-            )
-
-        # Update found count before download starts
-        with _state_lock:
-            _state["pdf_found"] = len(found_pdf_links)
-
-        downloaded_files, folder = download_all_pdfs(found_pdf_links, req.url)
-
-        # Update downloaded count live (download_service returns final list)
-        with _state_lock:
-            _state["downloaded"] = len(downloaded_files)
-
-        excel_path = create_excel(found_pdf_links, folder)
-        zip_path = create_zip(folder)
-
-        _finish_state(
-            downloaded=len(downloaded_files),
-            pdf_found=len(found_pdf_links)
-        )
-
-        return {
-            "success":      True,
-            "pdf_found":    len(found_pdf_links),
-            "downloaded":   len(downloaded_files),
-            "folder":       folder,
-            "excel_file":   f"/downloads/{os.path.relpath(excel_path, 'downloads').replace(os.sep, '/')}",
-            "zip_download": f"/downloads/{os.path.relpath(zip_path, 'downloads').replace(os.sep, '/')}",
-            "files":        [
-                {
-                    "name": os.path.basename(f),
-                    "path": f,
-                    "url":  f"/downloads/{os.path.relpath(f, 'downloads').replace(os.sep, '/')}",
-                }
-                for f in downloaded_files
-            ],
-            "message": "Crawl completed successfully",
-        }
-
-    except HTTPException:
-        _finish_state(downloaded=0, pdf_found=0)
-        raise
-    except Exception as e:
-        _finish_state(downloaded=0, pdf_found=0)
-        print(f"[SERVER ERROR] {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # Return immediately — frontend polls /status
+    return {"message": "Crawl started", "running": True}
