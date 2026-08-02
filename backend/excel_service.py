@@ -1,36 +1,41 @@
 import os
 from urllib.parse import urlparse
-import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 
 def create_excel(pdf_links: list, folder: str) -> str:
-    """
-    Create an Excel file inside `folder` that lists every discovered PDF URL
-    along with its filename and source domain.
-    Returns the absolute path to the created file.
-    """
     excel_path = os.path.join(folder, "pdf_links.xlsx")
 
-    rows = []
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PDF Links"
+
+    # Header style
+    header_fill = PatternFill("solid", fgColor="0284C7")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+
+    headers = ["#", "Filename", "Domain", "PDF URL"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    # Data rows
     for i, link in enumerate(pdf_links, start=1):
-        parsed = urlparse(link)
+        parsed   = urlparse(link)
         filename = link.split("/")[-1].split("?")[0].strip() or "document.pdf"
-        rows.append({
-            "#":        i,
-            "Filename": filename,
-            "Domain":   parsed.netloc,
-            "PDF URL":  link,
-        })
+        ws.cell(row=i+1, column=1, value=i)
+        ws.cell(row=i+1, column=2, value=filename)
+        ws.cell(row=i+1, column=3, value=parsed.netloc)
+        ws.cell(row=i+1, column=4, value=link)
 
-    df = pd.DataFrame(rows)
+    # Auto column widths
+    col_widths = [6, 40, 30, 80]
+    for col, width in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(col)].width = width
 
-    with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="PDF Links")
-
-        # Auto-size columns
-        ws = writer.sheets["PDF Links"]
-        for col in ws.columns:
-            max_len = max((len(str(cell.value)) for cell in col if cell.value), default=10)
-            ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 80)
-
+    wb.save(excel_path)
     return excel_path
