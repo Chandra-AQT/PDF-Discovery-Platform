@@ -29,6 +29,10 @@ export default function PdfTable({ result }) {
     </div>
   )
 
+  const zipUrl = result.zip_download
+    ? (result.zip_download.startsWith('http') ? result.zip_download : `${BASE_URL}${result.zip_download}`)
+    : null
+
   const files      = buildFileList(result)
   const filtered   = files.filter(f => (typeof f === 'string' ? f : f.name || '').toLowerCase().includes(search.toLowerCase()))
   const totalPages = Math.ceil(filtered.length / PER_PAGE)
@@ -44,14 +48,26 @@ export default function PdfTable({ result }) {
           <h3 className="font-display font-semibold" style={{ color: '#0c2d5e' }}>Discovered PDFs</h3>
           <span className="badge bg-sky-50 text-sky-700 border border-sky-200">{files.length} files</span>
         </div>
-        <div className="relative">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: '#94b8e0' }}>
-            <circle cx="11" cy="11" r="7"/><path d="m16 16 4 4" strokeLinecap="round"/>
-          </svg>
-          <input type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(1) }}
-            placeholder="Filter files…"
-            style={{ background: '#f8fafc', border: '1px solid #cddcef', color: '#1e3a5f', fontFamily: 'ui-monospace,monospace', fontSize: '0.75rem', paddingLeft: '2rem', paddingRight: '0.75rem', paddingTop: '0.375rem', paddingBottom: '0.375rem', borderRadius: '0.5rem', outline: 'none', width: '11rem', transition: 'all 200ms' }}
-          />
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Bulk ZIP download */}
+          {zipUrl && (
+            <a href={zipUrl} target="_blank" rel="noopener noreferrer" className="btn-primary gap-2 py-2 px-4 text-sm">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+                <path d="M12 3v12M9 12l3 3 3-3" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M3 19h18" strokeLinecap="round"/>
+              </svg>
+              Download All ZIP ({files.length})
+            </a>
+          )}
+          <div className="relative">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: '#94b8e0' }}>
+              <circle cx="11" cy="11" r="7"/><path d="m16 16 4 4" strokeLinecap="round"/>
+            </svg>
+            <input type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(1) }}
+              placeholder="Filter files…"
+              style={{ background: '#f8fafc', border: '1px solid #cddcef', color: '#1e3a5f', fontFamily: 'ui-monospace,monospace', fontSize: '0.75rem', paddingLeft: '2rem', paddingRight: '0.75rem', paddingTop: '0.375rem', paddingBottom: '0.375rem', borderRadius: '0.5rem', outline: 'none', width: '11rem', transition: 'all 200ms' }}
+            />
+          </div>
         </div>
       </div>
 
