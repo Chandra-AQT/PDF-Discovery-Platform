@@ -1,15 +1,15 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copy requirements first for layer caching
+# Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all backend source files
+# Copy source
 COPY . .
 
-# Create downloads directory
+# Create downloads dir
 RUN mkdir -p downloads
 
 EXPOSE 8000
