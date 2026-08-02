@@ -28,11 +28,13 @@ app.add_middleware(
 
 os.makedirs("downloads", exist_ok=True)
 
-# Mount static files AFTER creating the directory
-# Only mount if directory exists to avoid 405 conflicts on Railway
-if os.path.exists("downloads"):
+# Mount AFTER all routes to avoid 405 conflicts
+# Serves downloaded PDFs and ZIP files
+try:
     from fastapi.staticfiles import StaticFiles
     app.mount("/downloads", StaticFiles(directory="downloads"), name="downloads")
+except Exception as e:
+    print(f"[WARN] Static files mount failed: {e}")
 
 # ── Thread pool for running blocking crawl off the async event loop ────────────
 _executor = ThreadPoolExecutor(max_workers=2)

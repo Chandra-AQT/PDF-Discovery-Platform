@@ -138,6 +138,24 @@ export function useCrawler() {
             if (data.excel_file)   addLog('success', 'Excel dataset ready for download')
             if (data.zip_download) addLog('success', 'ZIP archive ready for download')
             saveToHistory(normalised, data, finalElapsed)
+          } else {
+            // result not ready yet even though running=false, try one more time
+            setTimeout(async () => {
+              try {
+                const retry = await getStatus()
+                if (retry.result) {
+                  const data = retry.result
+                  setStats({ pages: retry.pages || 0, pdf_found: data.pdf_found || 0, downloaded: data.downloaded || 0 })
+                  setResult(data)
+                  setStatus('done')
+                  addLog('success', `Crawl completed in ${finalElapsed}s`)
+                  addLog('success', `Found ${data.pdf_found} PDFs, downloaded ${data.downloaded}`)
+                  if (data.excel_file)   addLog('success', 'Excel dataset ready for download')
+                  if (data.zip_download) addLog('success', 'ZIP archive ready for download')
+                  saveToHistory(normalised, data, finalElapsed)
+                }
+              } catch {}
+            }, 1000)
           }
         }
       } catch (err) {
