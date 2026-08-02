@@ -12,9 +12,16 @@ from zip_service import create_zip
 
 app = FastAPI(title="PDF Discovery API")
 
+import os
+
+# In production set ALLOWED_ORIGINS env var to your Vercel URL
+# e.g. ALLOWED_ORIGINS=https://pdf-discovery.vercel.app
+_origins_env = os.getenv("ALLOWED_ORIGINS", "*")
+ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
