@@ -1,4 +1,4 @@
-import { BASE_URL } from '../api/api'
+import { BASE_URL, getExcelUrl, getZipUrl } from '../api/api'
 
 const fmt = (iso) => { try { return new Date(iso).toLocaleDateString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) } catch { return iso } }
 
@@ -26,8 +26,10 @@ export default function HistoryPanel({ history, onRerun, onClear }) {
       </div>
       <div style={{ divide: 'y' }}>
         {history.map((entry) => {
-          const excelUrl = entry.excel_file ? (entry.excel_file.startsWith('http') ? entry.excel_file : `${BASE_URL}${entry.excel_file}`) : null
-          const zipUrl   = entry.zip_download ? (entry.zip_download.startsWith('http') ? entry.zip_download : `${BASE_URL}${entry.zip_download}`) : null
+          const excelUrl = entry.excel_file
+            ? (entry.excel_file.startsWith('http') ? entry.excel_file : `${BASE_URL}${entry.excel_file}`)
+            : null
+          const zipUrl   = entry.zip_download ? getZipUrl() : null
           return (
             <div key={entry.id} className="group px-5 py-4 flex items-center gap-4 transition-colors"
               style={{ borderBottom: '1px solid #f0f6ff' }}
@@ -53,12 +55,12 @@ export default function HistoryPanel({ history, onRerun, onClear }) {
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.59" strokeLinecap="round"/></svg>Re-run
                 </button>
                 {excelUrl && (
-                  <a href={excelUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary py-1.5 px-3 text-xs gap-1.5" style={{ color: '#15803d', borderColor: '#bbf7d0' }}>
+                  <a href={getExcelUrl()} download className="btn-secondary py-1.5 px-3 text-xs gap-1.5" style={{ color: '#15803d', borderColor: '#bbf7d0' }}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3"><path d="M12 3v12M9 12l3 3 3-3" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 19h18" strokeLinecap="round"/></svg>Excel
                   </a>
                 )}
                 {zipUrl && (
-                  <a href={zipUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary py-1.5 px-3 text-xs gap-1.5" style={{ color: '#0369a1', borderColor: '#bae6fd' }}>
+                  <a href={getZipUrl()} download className="btn-secondary py-1.5 px-3 text-xs gap-1.5" style={{ color: '#0369a1', borderColor: '#bae6fd' }}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3"><path d="M12 3v12M9 12l3 3 3-3" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 19h18" strokeLinecap="round"/></svg>ZIP
                   </a>
                 )}

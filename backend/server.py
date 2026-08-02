@@ -1,20 +1,21 @@
 import os
+import io
 import asyncio
+import zipfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from crawler_service import crawl_website
 from download_service import download_all_pdfs
 from excel_service import create_excel
-from zip_service import create_zip
 
 app = FastAPI(title="DocPlus API")
 
-# In production set ALLOWED_ORIGINS env var to your Vercel URL
-# e.g. ALLOWED_ORIGINS=https://docplus.vercel.app
+# CORS
 _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
 ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",")]
 
@@ -28,25 +29,17 @@ app.add_middleware(
 
 os.makedirs("downloads", exist_ok=True)
 
-# Mount AFTER all routes to avoid 405 conflicts
-# Serves downloaded PDFs and ZIP files
-try:
-    from fastapi.staticfiles import StaticFiles
-    app.mount("/downloads", StaticFiles(directory="downloads"), name="downloads")
-except Exception as e:
-    print(f"[WARN] Static files mount failed: {e}")
-
-# ── Thread pool for running blocking crawl off the async event loop ────────────
+# ── Thread pool ────────────────────────────────────────────────────────────────
 _executor = ThreadPoolExecutor(max_workers=2)
 
-# ── Live crawl state (thread-safe) ────────────────────────────────────────────
+# ── Live state ─────────────────────────────────────────────────────────────────
 _state_lock = threading.Lock()
 _state = {
     "running":    False,
     "pages":      0,
     "pdf_found":  0,
     "downloaded": 0,
-    "result":     None,   # stores final result for polling after completion
+    "result":     None,
     "error":      None,
 }
 
@@ -83,9 +76,8 @@ def _finish_state(result=None, error=None):
             _state["error"] = error
 
 
-# ── The actual blocking crawl — runs in thread pool ───────────────────────────
+# ── Crawl worker ───────────────────────────────────────────────────────────────
 def _run_crawl(url: str):
-    """Blocking function: crawl → download → excel → zip. Returns result dict."""
     try:
         found_pdf_links = crawl_website(url, progress_callback=_update_progress)
 
@@ -100,21 +92,16 @@ def _run_crawl(url: str):
         _update_downloaded(len(downloaded_files))
 
         excel_path = create_excel(found_pdf_links, folder)
-        zip_path   = create_zip(folder)
 
         result = {
             "success":      True,
             "pdf_found":    len(found_pdf_links),
             "downloaded":   len(downloaded_files),
             "folder":       folder,
-            "excel_file":   f"/downloads/{os.path.relpath(excel_path, 'downloads').replace(os.sep, '/')}",
-            "zip_download": f"/downloads/{os.path.relpath(zip_path,   'downloads').replace(os.sep, '/')}",
-            "files": [
-                {
-                    "name": os.path.basename(f),
-                    "path": f,
-                    "url":  f"/downloads/{os.path.relpath(f, 'downloads').replace(os.sep, '/')}",
-                }
+            "excel_file":   excel_path,   # local path — served via /download-excel
+            "zip_ready":    True,         # client can call /download-zip
+            "files":        [
+                {"name": os.path.basename(f), "path": f}
                 for f in downloaded_files
             ],
             "message": "Crawl completed successfully",
@@ -122,16 +109,16 @@ def _run_crawl(url: str):
         _finish_state(result=result)
 
     except Exception as e:
-        print(f"[CRAWL THREAD ERROR] {e}")
+        print(f"[CRAWL ERROR] {e}")
         _finish_state(error=str(e))
 
 
-# ── Models ─────────────────────────────────────────────────────────────────────
+# ── Models ──────────────────────────────────────────────────────────────────────
 class UrlRequest(BaseModel):
     url: str
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+# ── Routes ──────────────────────────────────────────────────────────────────────
 @app.get("/")
 def root():
     return {"message": "DocPlus API Running"}
@@ -139,7 +126,6 @@ def root():
 
 @app.get("/status")
 def status():
-    """Returns live crawl progress. Always responds immediately."""
     with _state_lock:
         return {
             "pages":      _state["pages"],
@@ -153,15 +139,11 @@ def status():
 
 @app.post("/crawl")
 async def crawl(req: UrlRequest):
-    """
-    Kicks off the crawl in a background thread and returns immediately.
-    The frontend polls /status for live progress and the final result.
-    """
     with _state_lock:
         if _state["running"]:
             raise HTTPException(
                 status_code=409,
-                detail="A crawl is already in progress. Please wait for it to finish."
+                detail="A crawl is already in progress."
             )
 
     if not req.url.startswith(("http://", "https://")):
@@ -171,10 +153,64 @@ async def crawl(req: UrlRequest):
         )
 
     _reset_state()
-
-    # Run blocking crawl in thread pool — doesn't block the event loop
     loop = asyncio.get_running_loop()
     loop.run_in_executor(_executor, _run_crawl, req.url)
-
-    # Return immediately — frontend polls /status
     return {"message": "Crawl started", "running": True}
+
+
+@app.get("/download-excel")
+def download_excel():
+    """Stream the latest Excel file directly to the browser."""
+    with _state_lock:
+        result = _state.get("result")
+
+    if not result or not result.get("excel_file"):
+        raise HTTPException(status_code=404, detail="No Excel file available. Run a crawl first.")
+
+    excel_path = result["excel_file"]
+    if not os.path.exists(excel_path):
+        raise HTTPException(status_code=404, detail="Excel file not found on server.")
+
+    filename = os.path.basename(excel_path)
+
+    def iter_file():
+        with open(excel_path, "rb") as f:
+            while chunk := f.read(65536):
+                yield chunk
+
+    return StreamingResponse(
+        iter_file(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@app.get("/download-zip")
+def download_zip():
+    """Build a ZIP of all downloaded PDFs in-memory and stream to browser."""
+    with _state_lock:
+        result = _state.get("result")
+
+    if not result or not result.get("files"):
+        raise HTTPException(status_code=404, detail="No files available. Run a crawl first.")
+
+    files   = result["files"]
+    folder  = result.get("folder", "downloads")
+    zipname = os.path.basename(folder) + ".zip"
+
+    def generate_zip():
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in files:
+                path = f.get("path", "")
+                if os.path.exists(path):
+                    zf.write(path, f.get("name", os.path.basename(path)))
+        buf.seek(0)
+        while chunk := buf.read(65536):
+            yield chunk
+
+    return StreamingResponse(
+        generate_zip(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zipname}"'}
+    )

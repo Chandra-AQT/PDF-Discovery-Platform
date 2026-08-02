@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BASE_URL } from '../api/api'
+import { BASE_URL, getZipUrl } from '../api/api'
 
 function buildFileList(result) {
   if (!result) return []
@@ -29,9 +29,7 @@ export default function PdfTable({ result }) {
     </div>
   )
 
-  const zipUrl = result.zip_download
-    ? (result.zip_download.startsWith('http') ? result.zip_download : `${BASE_URL}${result.zip_download}`)
-    : null
+  const zipUrl = result.zip_ready || result.zip_download ? getZipUrl() : null
 
   const files      = buildFileList(result)
   const filtered   = files.filter(f => (typeof f === 'string' ? f : f.name || '').toLowerCase().includes(search.toLowerCase()))
@@ -51,7 +49,7 @@ export default function PdfTable({ result }) {
         <div className="flex items-center gap-3 flex-wrap">
           {/* Bulk ZIP download */}
           {zipUrl && (
-            <a href={zipUrl} target="_blank" rel="noopener noreferrer" className="btn-primary gap-2 py-2 px-4 text-sm">
+            <a href={zipUrl} download className="btn-primary gap-2 py-2 px-4 text-sm">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
                 <path d="M12 3v12M9 12l3 3 3-3" strokeLinecap="round" strokeLinejoin="round"/>
                 <path d="M3 19h18" strokeLinecap="round"/>
