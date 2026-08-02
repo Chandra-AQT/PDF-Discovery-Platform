@@ -4,19 +4,27 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Primary accent — sky/blue
         brand: {
-          300: '#c4b5fd',
-          400: '#a78bfa',
-          500: '#8b5cf6',
-          600: '#7c3aed',
-          700: '#6d28d9',
+          50:  '#f0f9ff',
+          100: '#e0f2fe',
+          200: '#bae6fd',
+          300: '#7dd3fc',
+          400: '#38bdf8',
+          500: '#0ea5e9',
+          600: '#0284c7',
+          700: '#0369a1',
         },
+        // Surface — clean whites and light greys with a blue tint
         surface: {
-          600: '#2a2a3f',
-          700: '#1e1e30',
-          800: '#16162a',
-          900: '#0f0f1e',
-          950: '#09090f',
+          50:  '#f8fafc',
+          100: '#f0f6ff',
+          200: '#e2ecf9',
+          300: '#ccddf4',
+          400: '#94b8e0',
+          500: '#60a0d4',
+          600: '#3b82c4',
+          700: '#2563a8',
         },
       },
       fontFamily: {
@@ -24,7 +32,7 @@ export default {
         mono:    ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       backgroundImage: {
-        'brand-gradient': 'linear-gradient(135deg, #7c3aed, #6366f1)',
+        'brand-gradient': 'linear-gradient(135deg, #0ea5e9, #6366f1)',
       },
     },
   },

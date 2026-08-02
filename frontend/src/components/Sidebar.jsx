@@ -16,23 +16,23 @@ function NodeMap({ isRunning }) {
     const centre = { x: W/2, y: H/2 }
     const nodes = [centre]
     for (let i = 0; i < 12; i++) {
-      const angle = (i/12)*Math.PI*2, r = 30+Math.random()*40
+      const angle = (i/12)*Math.PI*2, r = 28+Math.random()*36
       nodes.push({ x: centre.x+Math.cos(angle)*r, y: centre.y+Math.sin(angle)*r })
     }
     let tick = 0
     const draw = () => {
       ctx.clearRect(0,0,W,H)
       nodes.slice(1).forEach((n,i) => {
-        ctx.strokeStyle = `rgba(139,92,246,${isRunning ? 0.15+0.1*Math.sin(tick/20+i) : 0.06})`
+        ctx.strokeStyle = `rgba(2,132,199,${isRunning ? 0.2+0.12*Math.sin(tick/20+i) : 0.1})`
         ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(centre.x,centre.y); ctx.lineTo(n.x,n.y); ctx.stroke()
         if (isRunning && tick%40===i*3) {
           const t=(tick%40)/40, px=centre.x+(n.x-centre.x)*t, py=centre.y+(n.y-centre.y)*t
-          ctx.fillStyle='rgba(167,139,250,0.9)'; ctx.beginPath(); ctx.arc(px,py,1.5,0,Math.PI*2); ctx.fill()
+          ctx.fillStyle='rgba(14,165,233,0.85)'; ctx.beginPath(); ctx.arc(px,py,1.5,0,Math.PI*2); ctx.fill()
         }
       })
       nodes.forEach((n,i) => {
-        const pulse = isRunning ? 0.4+0.3*Math.sin(tick/15+i) : 0.2
-        ctx.fillStyle = i===0 ? `rgba(139,92,246,${pulse+0.3})` : `rgba(99,66,200,${pulse})`
+        const pulse = isRunning ? 0.5+0.3*Math.sin(tick/15+i) : 0.3
+        ctx.fillStyle = i===0 ? `rgba(2,132,199,${pulse+0.2})` : `rgba(14,165,233,${pulse})`
         ctx.beginPath(); ctx.arc(n.x,n.y,i===0?4:2,0,Math.PI*2); ctx.fill()
       })
       tick++; animRef.current = requestAnimationFrame(draw)
@@ -44,35 +44,50 @@ function NodeMap({ isRunning }) {
 
 export default function Sidebar({ activeTab, setActiveTab, isRunning, stats }) {
   return (
-    <aside className="w-56 flex-shrink-0 bg-surface-900 border-r border-surface-700/60 flex flex-col h-full">
+    <aside className="w-56 flex-shrink-0 flex flex-col h-full border-r border-blue-100"
+      style={{ backgroundColor: '#ffffff' }}>
       <nav className="p-3 flex-1 space-y-0.5">
-        <div className="font-mono text-[10px] text-zinc-600 tracking-widest uppercase px-3 pb-2 pt-1">Navigation</div>
+        <div className="font-mono text-[10px] text-sky-400 tracking-widest uppercase px-3 pb-2 pt-1">
+          Navigation
+        </div>
         {NAV_ITEMS.map(({ id, label, icon: Icon, desc }) => (
-          <button key={id} onClick={() => setActiveTab(id)} className={`sidebar-link w-full text-left ${activeTab===id?'active':''}`}>
-            <Icon className={`w-4 h-4 flex-shrink-0 ${activeTab===id?'text-brand-400':'text-zinc-600'}`} />
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`sidebar-link w-full text-left ${activeTab===id?'active':''}`}
+          >
+            <Icon className={`w-4 h-4 flex-shrink-0 ${activeTab===id?'text-sky-600':'text-sky-400'}`} />
             <div className="min-w-0">
               <div className="text-sm leading-tight">{label}</div>
-              <div className="text-[10px] text-zinc-600 leading-tight">{desc}</div>
+              <div className="text-[10px] leading-tight" style={{ color: '#94b8e0' }}>{desc}</div>
             </div>
             {id==='results' && stats.pdf_found > 0 && (
-              <span className="ml-auto badge bg-brand-600/20 text-brand-300 border border-brand-600/20 text-[10px]">{stats.pdf_found}</span>
+              <span className="ml-auto badge bg-sky-100 text-sky-700 border border-sky-200 text-[10px]">
+                {stats.pdf_found}
+              </span>
             )}
           </button>
         ))}
       </nav>
-      <div className="mx-3 mb-3 rounded-xl overflow-hidden border border-surface-700/40" style={{ height:'120px' }}>
-        <div className="relative h-full bg-surface-950/80">
+
+      {/* Node map */}
+      <div className="mx-3 mb-3 rounded-xl overflow-hidden border border-blue-100" style={{ height:'120px', background: '#f0f6ff' }}>
+        <div className="relative h-full">
           <NodeMap isRunning={isRunning} />
           <div className="absolute bottom-2 left-0 right-0 flex justify-center">
-            <span className="font-mono text-[9px] text-zinc-600 tracking-widest uppercase">{isRunning?'CRAWLING':'STANDBY'}</span>
+            <span className="font-mono text-[9px] tracking-widest uppercase" style={{ color: '#94b8e0' }}>
+              {isRunning ? 'CRAWLING' : 'STANDBY'}
+            </span>
           </div>
         </div>
       </div>
+
+      {/* Quick stats */}
       <div className="p-3 pt-0 space-y-1">
         {[['Pages',stats.pages],['PDFs Found',stats.pdf_found],['Downloaded',stats.downloaded]].map(([label,val]) => (
-          <div key={label} className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-surface-800/60">
-            <span className="font-mono text-[11px] text-zinc-500">{label}</span>
-            <span className={`font-mono text-xs font-semibold ${val>0?'text-brand-300':'text-zinc-600'}`}>{val}</span>
+          <div key={label} className="flex items-center justify-between px-3 py-1.5 rounded-lg" style={{ backgroundColor: '#f0f6ff' }}>
+            <span className="font-mono text-[11px]" style={{ color: '#60a0d4' }}>{label}</span>
+            <span className={`font-mono text-xs font-semibold ${val>0?'text-sky-600':'text-slate-400'}`}>{val}</span>
           </div>
         ))}
       </div>
