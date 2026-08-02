@@ -113,6 +113,9 @@ export function useCrawler() {
           pages:      s.pages      || 0,
           pdf_found:  s.pdf_found  || 0,
           downloaded: s.downloaded || 0,
+          total:      s.total      || 0,
+          progress:   s.progress   || 0,
+          phase:      s.phase      || 'running',
         })
 
         // Crawl finished on backend
@@ -184,7 +187,7 @@ export function useCrawler() {
     setCurrentUrl(normalised)
     setError(null)
     setResult(null)
-    setStats({ pages: 0, pdf_found: 0, downloaded: 0 })
+    setStats({ pages: 0, pdf_found: 0, downloaded: 0, total: 0, progress: 0, phase: "idle" })
     setLogs([])
     setElapsed(0)
 
@@ -241,7 +244,7 @@ export function useCrawler() {
   const reset = useCallback(() => {
     stopAll()
     setStatus('idle')
-    setStats({ pages: 0, pdf_found: 0, downloaded: 0 })
+    setStats({ pages: 0, pdf_found: 0, downloaded: 0, total: 0, progress: 0, phase: "idle" })
     setLogs([]); setResult(null); setError(null); setCurrentUrl(''); setElapsed(0)
   }, [stopAll])
 

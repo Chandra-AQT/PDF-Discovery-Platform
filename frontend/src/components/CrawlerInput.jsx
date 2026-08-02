@@ -2,10 +2,17 @@ import { useState, useRef, useEffect } from 'react'
 
 const EXAMPLE_URLS = ['samsung.com/support', 'intel.com/content/dam', 'amd.com/resources', 'nvidia.com/drivers']
 
-export default function CrawlerInput({ onStart, isRunning, isDone, currentUrl, elapsed }) {
+export default function CrawlerInput({ onStart, isRunning, isDone, currentUrl, elapsed, progress = 0, phase = '' }) {
   const [url, setUrl]     = useState('')
   const [error, setError] = useState('')
   const inputRef          = useRef(null)
+
+  const currentPhase = {
+    crawling:    'Crawling pages…',
+    downloading: 'Downloading PDFs…',
+    packaging:   'Packaging Excel…',
+    done:        'Complete!',
+  }[phase] || 'Processing…'
 
   useEffect(() => { if (!isRunning) inputRef.current?.focus() }, [isRunning])
 
@@ -90,15 +97,28 @@ export default function CrawlerInput({ onStart, isRunning, isDone, currentUrl, e
 
       {isRunning && (
         <div className="mt-4 animate-fade-in">
-          <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center justify-between mb-2">
             <span className="font-mono text-xs text-sky-600 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse"/>
-              Crawling in progress…
+              {currentPhase}
             </span>
-            <span className="font-mono text-xs truncate max-w-xs" style={{ color: '#94b8e0' }}>{currentUrl}</span>
+            <span className="font-mono text-xs font-semibold" style={{ color: '#0284c7' }}>
+              {progress}%
+            </span>
           </div>
-          <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: '#e0f2fe' }}>
-            <div className="h-full shimmer-bg animate-shimmer rounded-full" style={{ width: '100%' }}/>
+          {/* Real percentage progress bar */}
+          <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: '#e0f2fe' }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${progress}%`,
+                background: 'linear-gradient(90deg, #38bdf8, #0284c7)',
+                boxShadow: '0 0 8px rgba(2,132,199,0.4)',
+              }}
+            />
+          </div>
+          <div className="flex justify-between mt-1.5 font-mono text-[10px]" style={{ color: '#94b8e0' }}>
+            <span>{currentUrl}</span>
           </div>
         </div>
       )}

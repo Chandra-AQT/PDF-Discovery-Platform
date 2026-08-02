@@ -28,6 +28,8 @@ export default function Dashboard({ crawler, activeTab }) {
           isDone={isDone}
           currentUrl={currentUrl}
           elapsed={elapsed}
+          progress={stats.progress || 0}
+          phase={stats.phase || ''}
         />
 
         {isError && <ErrorAlert error={error} onDismiss={reset} />}
