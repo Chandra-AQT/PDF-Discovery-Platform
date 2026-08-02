@@ -1,12 +1,12 @@
 {
-  "name": "pdf-discovery-frontend",
+  "name": "docplus-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:win": "xcopy /E /I /Y . C:\\pdf-discovery-build\\ && cd /D C:\\pdf-discovery-build && vite build && xcopy /E /I /Y C:\\pdf-discovery-build\\dist dist\\",
+    "build:win": "xcopy /E /I /Y . C:\\docplus-build\\ && cd /D C:\\docplus-build && vite build && xcopy /E /I /Y C:\\docplus-build\\dist dist\\",
     "lint": "eslint .",
     "preview": "vite preview"
   },

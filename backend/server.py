@@ -10,12 +10,12 @@ from download_service import download_all_pdfs
 from excel_service import create_excel
 from zip_service import create_zip
 
-app = FastAPI(title="PDF Discovery API")
+app = FastAPI(title="DocPlus API")
 
 import os
 
 # In production set ALLOWED_ORIGINS env var to your Vercel URL
-# e.g. ALLOWED_ORIGINS=https://pdf-discovery.vercel.app
+# e.g. ALLOWED_ORIGINS=https://docplus.vercel.app
 _origins_env = os.getenv("ALLOWED_ORIGINS", "*")
 ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",")]
 
@@ -69,7 +69,7 @@ class UrlRequest(BaseModel):
 # ── Routes ─────────────────────────────────────────────────────────────────────
 @app.get("/")
 def root():
-    return {"message": "PDF Discovery API Running"}
+    return {"message": "DocPlus API Running"}
 
 
 @app.get("/status")

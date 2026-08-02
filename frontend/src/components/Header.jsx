@@ -16,7 +16,7 @@ export default function Header({ isRunning }) {
           {isRunning && <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-surface-950 animate-pulse" />}
         </div>
         <div>
-          <span className="font-display font-bold text-white text-sm leading-none">PDF Discovery</span>
+          <span className="font-display font-bold text-white text-sm leading-none">DocPlus</span>
           <div className="font-mono text-[10px] text-brand-400/70 tracking-widest uppercase leading-none mt-0.5">Platform v1.0</div>
         </div>
       </div>

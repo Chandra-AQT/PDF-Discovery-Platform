@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { crawlSite, getStatus } from '../api/api'
 
 const POLL_MS = 2000
-const HISTORY_KEY = 'pdf_discovery_history'
+const HISTORY_KEY = 'docplus_history'
 
 let logId = 0
 const makeLog = (level, message) => ({

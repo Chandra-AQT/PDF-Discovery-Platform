@@ -1,11 +1,11 @@
-# PDF Discovery Platform
+# DocPlus
 
-Crawls any website, finds all `.pdf` files, downloads them into a named folder, and packages them with an Excel index + ZIP archive.
+A full-stack web platform that crawls any website, discovers all `.pdf` documents, downloads them into organized folders, and delivers them with an Excel index and ZIP archive.
 
 ## Project Structure
 
 ```
-files.downloader/
+DocPlus/
 ├── backend/          ← Python / FastAPI
 │   ├── main.py           entry point  →  python main.py
 │   ├── server.py         FastAPI routes (/crawl, /status)
@@ -53,3 +53,14 @@ npm run dev
 3. Every `.pdf` link found is downloaded in parallel into `backend/downloads/<domain>/`
 4. An Excel file listing all PDF URLs is created inside that folder
 5. Everything is zipped for one-click download from the UI
+
+## Deployment
+
+| Service  | Platform |
+|----------|----------|
+| Backend  | Railway  |
+| Frontend | Vercel   |
+
+**Environment variables:**
+- Railway → `ALLOWED_ORIGINS=https://your-app.vercel.app`
+- Vercel  → `VITE_API_URL=https://your-app.up.railway.app`
