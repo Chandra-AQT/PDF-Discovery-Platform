@@ -4,7 +4,6 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from crawler_service import crawl_website
@@ -28,7 +27,12 @@ app.add_middleware(
 )
 
 os.makedirs("downloads", exist_ok=True)
-app.mount("/downloads", StaticFiles(directory="downloads"), name="downloads")
+
+# Mount static files AFTER creating the directory
+# Only mount if directory exists to avoid 405 conflicts on Railway
+if os.path.exists("downloads"):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/downloads", StaticFiles(directory="downloads"), name="downloads")
 
 # ── Thread pool for running blocking crawl off the async event loop ────────────
 _executor = ThreadPoolExecutor(max_workers=2)
