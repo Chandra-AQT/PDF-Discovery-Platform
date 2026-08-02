@@ -1,17 +1,20 @@
 import os
 import io
-import asyncio
+import json
 import zipfile
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import queue
+from urllib.parse import urlparse
+
+import requests as req_lib
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 from crawler_service import crawl_website
-from download_service import download_all_pdfs
 from excel_service import create_excel
+
+# ── App setup ────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="DocPlus API")
 
@@ -28,179 +31,67 @@ app.add_middleware(
 
 os.makedirs("downloads", exist_ok=True)
 
-_executor = ThreadPoolExecutor(max_workers=2)
+# ── Shared state (for /status and download endpoints) ─────────────────────────
 
 _state_lock = threading.Lock()
 _state = {
     "running":    False,
-    "phase":      "idle",      # idle | crawling | downloading | packaging | done
     "pages":      0,
     "pdf_found":  0,
     "downloaded": 0,
-    "total_to_download": 0,
-    "progress":   0,           # 0-100 percentage
+    "total":      0,
+    "progress":   0,
+    "phase":      "idle",
     "result":     None,
     "error":      None,
 }
 
 
-def _reset_state():
+def _set_state(**kwargs):
     with _state_lock:
-        _state.update({
-            "running": True, "phase": "crawling",
-            "pages": 0, "pdf_found": 0,
-            "downloaded": 0, "total_to_download": 0,
-            "progress": 0, "result": None, "error": None,
-        })
+        _state.update(kwargs)
 
 
-def _update_crawl_progress(pages: int, pdf_found: int):
-    with _state_lock:
-        _state["pages"]     = pages
-        _state["pdf_found"] = pdf_found
-        # Crawling = 0-50% of total progress
-        _state["progress"]  = min(int(pages / 2), 50)
+# ── Inline PDF downloader (no registry, no download_service) ─────────────────
 
+def download_pdf(link: str, folder: str):
+    """Download a single PDF. Returns local path on success, None on failure."""
+    fname = link.split("/")[-1].split("?")[0].strip() or "document.pdf"
+    if not fname.lower().endswith(".pdf"):
+        fname += ".pdf"
+    path = os.path.join(folder, fname)
 
-def _update_download_progress(downloaded: int, total: int):
-    with _state_lock:
-        _state["downloaded"]        = downloaded
-        _state["total_to_download"] = total
-        # Downloading = 50-90% of total progress
-        pct = int((downloaded / total) * 40) if total > 0 else 0
-        _state["progress"] = 50 + pct
-        _state["phase"]    = "downloading"
+    # Skip if already on disk and looks complete
+    if os.path.exists(path) and os.path.getsize(path) > 500:
+        return path
 
-
-def _finish_state(result=None, error=None):
-    with _state_lock:
-        _state["running"]  = False
-        _state["progress"] = 100 if result else _state["progress"]
-        _state["phase"]    = "done" if result else "error"
-        if result:
-            _state["pdf_found"]  = result.get("pdf_found",  _state["pdf_found"])
-            _state["downloaded"] = result.get("downloaded", _state["downloaded"])
-            _state["pages"]      = result.get("pages",      _state["pages"])
-            _state["result"]     = result
-        if error:
-            _state["error"] = error
-
-
-def _run_crawl(url: str):
     try:
-        # ── Phase 1: Crawl ──────────────────────────────────────────────
-        with _state_lock:
-            _state["phase"] = "crawling"
-
-        found_pdf_links = crawl_website(url, progress_callback=_update_crawl_progress)
-
-        if not found_pdf_links:
-            _finish_state(error="No PDF links found on this website.")
-            return
-
-        total = len(found_pdf_links)
-        with _state_lock:
-            _state["pdf_found"]          = total
-            _state["total_to_download"]  = total
-            _state["progress"]           = 50
-            _state["phase"]              = "downloading"
-
-        # ── Phase 2: Download with live progress ────────────────────────
-        # Use a custom downloader that reports progress per file
-        from registry_service import file_exists, register_file
-        import requests as req_lib
-        from urllib.parse import urlparse
-        from concurrent.futures import ThreadPoolExecutor as TPE, as_completed
-
-        domain = urlparse(url).netloc
-        parts  = domain.replace("www.", "").split(".")
-        name   = parts[-2] if len(parts) >= 2 else parts[0]
-        folder = os.path.join("downloads", name)
-        os.makedirs(folder, exist_ok=True)
-
-        HEADERS = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-
-        downloaded_count = [0]
-        downloaded_files = []
-        lock = threading.Lock()
-
-        def dl_one(link):
-            # Clear registry check — always try to download fresh on Railway
-            fname = link.split("/")[-1].split("?")[0].strip() or "document.pdf"
-            if not fname.lower().endswith(".pdf"):
-                fname += ".pdf"
-            path = os.path.join(folder, fname)
-
-            # Skip if already exists on disk
-            if os.path.exists(path) and os.path.getsize(path) > 0:
-                with lock:
-                    downloaded_count[0] += 1
-                    _update_download_progress(downloaded_count[0], total)
-                return path
-
-            try:
-                r = req_lib.get(link, headers=HEADERS, timeout=20,
-                                allow_redirects=True, stream=True)
-                r.raise_for_status()
-                ct = r.headers.get("content-type", "").lower()
-                if "pdf" not in ct and not link.lower().endswith(".pdf"):
-                    return None
-                with open(path, "wb") as f:
-                    for chunk in r.iter_content(65536):
-                        if chunk:
-                            f.write(chunk)
-                with lock:
-                    downloaded_count[0] += 1
-                    _update_download_progress(downloaded_count[0], total)
-                return path
-            except Exception as e:
-                print(f"[DL ERROR] {link}: {e}")
-                with lock:
-                    downloaded_count[0] += 1
-                    _update_download_progress(downloaded_count[0], total)
-                return None
-
-        with TPE(max_workers=10) as ex:
-            futures = {ex.submit(dl_one, lnk): lnk for lnk in found_pdf_links}
-            for fut in as_completed(futures):
-                r = fut.result()
-                if r:
-                    downloaded_files.append(r)
-
-        # ── Phase 3: Excel ──────────────────────────────────────────────
-        with _state_lock:
-            _state["phase"]    = "packaging"
-            _state["progress"] = 92
-
-        excel_path = create_excel(found_pdf_links, folder)
-
-        with _state_lock:
-            _state["progress"] = 100
-
-        result = {
-            "success":    True,
-            "pdf_found":  total,
-            "downloaded": len(downloaded_files),
-            "pages":      _state["pages"],
-            "folder":     folder,
-            "excel_file": excel_path,
-            "zip_ready":  len(downloaded_files) > 0,
-            "files":      [{"name": os.path.basename(f), "path": f}
-                           for f in downloaded_files],
-            "message":    "Crawl completed successfully",
-        }
-        _finish_state(result=result)
-
-    except Exception as e:
-        print(f"[CRAWL ERROR] {e}")
-        _finish_state(error=str(e))
+        r = req_lib.get(
+            link,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=20,
+            stream=True,
+        )
+        r.raise_for_status()
+        ct = r.headers.get("content-type", "").lower()
+        if "pdf" not in ct and not link.lower().endswith(".pdf"):
+            return None
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(65536):
+                if chunk:
+                    f.write(chunk)
+        return path
+    except Exception:
+        return None
 
 
-class UrlRequest(BaseModel):
-    url: str
+# ── SSE helper ────────────────────────────────────────────────────────────────
 
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 def root():
@@ -208,52 +99,184 @@ def root():
 
 
 @app.get("/status")
-def status():
+def get_status():
     with _state_lock:
-        return {
-            "pages":      _state["pages"],
-            "pdf_found":  _state["pdf_found"],
-            "downloaded": _state["downloaded"],
-            "total":      _state["total_to_download"],
-            "progress":   _state["progress"],
-            "phase":      _state["phase"],
-            "running":    _state["running"],
-            "error":      _state["error"],
-            "result":     _state["result"],
+        return dict(_state)
+
+
+@app.get("/crawl-stream")
+def crawl_stream(url: str):
+    """
+    SSE endpoint.  Streams progress events in real-time while the crawl and
+    downloads run, then signals completion with a 'done' event.
+    """
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Invalid URL — must start with http:// or https://")
+
+    def generate():
+        # ── Reset shared state ────────────────────────────────────────
+        _set_state(
+            running=True, phase="crawling",
+            pages=0, pdf_found=0, downloaded=0, total=0,
+            progress=0, result=None, error=None,
+        )
+
+        # ── Phase 1: Crawl via background thread + queue ──────────────
+        crawl_q: queue.Queue = queue.Queue()
+        result_holder = [None]
+        error_holder  = [None]
+
+        def on_progress(pages: int, found: int):
+            progress = min(int(pages / 2), 50)
+            _set_state(pages=pages, pdf_found=found, progress=progress)
+            crawl_q.put({
+                "type":      "progress",
+                "phase":     "crawling",
+                "pages":     pages,
+                "pdf_found": found,
+                "progress":  progress,
+            })
+
+        def run_crawl():
+            try:
+                links = crawl_website(url, progress_callback=on_progress)
+                result_holder[0] = links
+            except Exception as exc:
+                error_holder[0] = str(exc)
+            finally:
+                crawl_q.put(None)  # sentinel
+
+        t = threading.Thread(target=run_crawl, daemon=True)
+        t.start()
+
+        # Drain progress events while crawl runs
+        while True:
+            try:
+                item = crawl_q.get(timeout=120)
+            except queue.Empty:
+                error_holder[0] = "Crawl timed out after 120 s waiting for progress."
+                break
+            if item is None:
+                break
+            yield _sse(item)
+
+        if error_holder[0]:
+            _set_state(running=False, phase="error", error=error_holder[0])
+            yield _sse({"type": "error", "message": error_holder[0]})
+            return
+
+        pdf_links = result_holder[0] or []
+        total = len(pdf_links)
+
+        if total == 0:
+            msg = "No PDF links found on this website."
+            _set_state(running=False, phase="error", error=msg)
+            yield _sse({"type": "error", "message": msg})
+            return
+
+        # Emit a final crawl-phase update so UI sees full pdf_found
+        with _state_lock:
+            pages_final = _state["pages"]
+        _set_state(pdf_found=total, total=total, progress=50, phase="downloading")
+        yield _sse({
+            "type":      "progress",
+            "phase":     "downloading",
+            "pages":     pages_final,
+            "pdf_found": total,
+            "downloaded": 0,
+            "total":     total,
+            "progress":  50,
+        })
+
+        # ── Determine download folder ──────────────────────────────────
+        domain  = urlparse(url).netloc
+        parts   = domain.replace("www.", "").split(".")
+        name    = parts[-2] if len(parts) >= 2 else parts[0]
+        folder_path = os.path.join("downloads", name)
+        os.makedirs(folder_path, exist_ok=True)
+
+        # ── Phase 2: Download one by one, yield progress events ───────
+        downloaded_files = []
+        downloaded_count = 0
+
+        for link in pdf_links:
+            path = download_pdf(link, folder_path)
+            if path:
+                downloaded_files.append({"name": os.path.basename(path), "path": path})
+            downloaded_count += 1
+            pct = 50 + int((downloaded_count / total) * 40)
+            _set_state(downloaded=downloaded_count, progress=pct)
+            yield _sse({
+                "type":        "progress",
+                "phase":       "downloading",
+                "pages":       pages_final,
+                "pdf_found":   total,
+                "downloaded":  downloaded_count,
+                "total":       total,
+                "progress":    pct,
+            })
+
+        # ── Phase 3: Create Excel (90-100%) ───────────────────────────
+        _set_state(phase="packaging", progress=90)
+        yield _sse({
+            "type":       "progress",
+            "phase":      "packaging",
+            "pdf_found":  total,
+            "downloaded": len(downloaded_files),
+            "total":      total,
+            "progress":   90,
+        })
+
+        try:
+            excel_path = create_excel(pdf_links, folder_path)
+        except Exception as exc:
+            excel_path = None
+            print(f"[EXCEL ERROR] {exc}")
+
+        # ── Done ───────────────────────────────────────────────────────
+        result = {
+            "success":    True,
+            "pdf_found":  total,
+            "downloaded": len(downloaded_files),
+            "pages":      pages_final,
+            "folder":     folder_path,
+            "excel_file": excel_path or "",
+            "zip_ready":  len(downloaded_files) > 0,
+            "files":      downloaded_files,
+            "message":    "Crawl completed successfully",
         }
+        _set_state(running=False, phase="done", progress=100, result=result)
 
+        yield _sse({
+            "type":       "done",
+            "pdf_found":  total,
+            "downloaded": len(downloaded_files),
+            "pages":      pages_final,
+            "progress":   100,
+            "excel_file": excel_path or "",
+            "zip_ready":  len(downloaded_files) > 0,
+            "folder":     folder_path,
+        })
 
-@app.post("/crawl")
-async def crawl(req: UrlRequest):
-    with _state_lock:
-        if _state["running"]:
-            raise HTTPException(status_code=409,
-                detail="A crawl is already in progress.")
-
-    if not req.url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400,
-            detail="Please enter a valid URL starting with http:// or https://")
-
-    # Reset state FIRST so polls see running=True immediately
-    _reset_state()
-
-    # Small delay to ensure state is flushed before thread reads it
-    loop = asyncio.get_running_loop()
-    loop.run_in_executor(_executor, _run_crawl, req.url)
-
-    return {"message": "Crawl started", "running": True}
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":    "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection":       "keep-alive",
+        },
+    )
 
 
 @app.delete("/crawl")
-async def cancel_crawl():
-    """Allow frontend to reset state if a stale result is stuck."""
-    with _state_lock:
-        _state.update({
-            "running": False, "phase": "idle",
-            "pages": 0, "pdf_found": 0,
-            "downloaded": 0, "total_to_download": 0,
-            "progress": 0, "result": None, "error": None,
-        })
+def cancel_crawl():
+    """Reset state — useful if a previous crawl left a stale result."""
+    _set_state(
+        running=False, phase="idle",
+        pages=0, pdf_found=0, downloaded=0, total=0,
+        progress=0, result=None, error=None,
+    )
     return {"message": "State cleared"}
 
 
@@ -262,19 +285,23 @@ def download_excel():
     with _state_lock:
         result = _state.get("result")
     if not result or not result.get("excel_file"):
-        raise HTTPException(status_code=404,
-            detail="No Excel file available. Run a crawl first.")
+        raise HTTPException(status_code=404, detail="No Excel file available. Run a crawl first.")
     excel_path = result["excel_file"]
     if not os.path.exists(excel_path):
-        raise HTTPException(status_code=404, detail="Excel file not found.")
+        raise HTTPException(status_code=404, detail="Excel file not found on disk.")
+
     filename = os.path.basename(excel_path)
+
     def iter_file():
         with open(excel_path, "rb") as f:
             while chunk := f.read(65536):
                 yield chunk
-    return StreamingResponse(iter_file(),
+
+    return StreamingResponse(
+        iter_file(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/download-zip")
@@ -282,11 +309,12 @@ def download_zip():
     with _state_lock:
         result = _state.get("result")
     if not result or not result.get("files"):
-        raise HTTPException(status_code=404,
-            detail="No files available. Run a crawl first.")
+        raise HTTPException(status_code=404, detail="No files available. Run a crawl first.")
+
     files   = result["files"]
     folder  = result.get("folder", "downloads")
     zipname = os.path.basename(folder) + ".zip"
+
     def generate_zip():
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -297,6 +325,9 @@ def download_zip():
         buf.seek(0)
         while chunk := buf.read(65536):
             yield chunk
-    return StreamingResponse(generate_zip(),
+
+    return StreamingResponse(
+        generate_zip(),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{zipname}"'})
+        headers={"Content-Disposition": f'attachment; filename="{zipname}"'},
+    )
